@@ -1,5 +1,11 @@
 import tensorflow as tf
 
+NUM_CLASSES = 228
+STARTER_LEARNING_RATE = 0.005
+CUT_OFF = 0.184
+DECAY_STEPS = 400000
+DECAY_RATE = 0.5
+
 def alexnet_model_fn(features, labels, mode):
     """Model function for Alexnet."""
     # Input Layer
@@ -89,36 +95,41 @@ def alexnet_model_fn(features, labels, mode):
     # Logits Layer
     # Input Tensor Shape: [batch_size, 4096]
     # Output Tensor Shape: [batch_size, 228]
-    logits = tf.layers.dense(inputs=dropout7, units=228)
+    logits = tf.layers.dense(inputs=dropout7, units=NUM_CLASSES)
     #print("logits: {}".format(logits.shape))
 
     # Generate Predictions
     predictions = {
         # Generate predictions (for PREDICT and EVAL mode)
-        "classes": tf.cast(tf.sigmoid(logits) >= 0.16, tf.int8, name="class_tensor"),
+        "classes": tf.cast(tf.sigmoid(logits) >= CUT_OFF, tf.int8, name="class_tensor"),
         # Add `sigmoid_tensor` to the graph. It is used for PREDICT and by the
         # `logging_hook`.
         "probabilities": tf.nn.sigmoid(logits, name="prob_tensor")
-    }  
+    } 
 
     if mode == tf.estimator.ModeKeys.PREDICT:
         return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
 
     # Calculate Loss (for both TRAIN and EVAL modes)
-    if mode != tf.estimator.ModeKeys.PREDICT:
-        #onehot_labels = tf.one_hot(indices=tf.cast(labels, tf.int32), depth=228)
-        #w_tensor = tf.convert_to_tensor(w)
-        #w_tensor = tf.reshape(w_tensor, [-1,228])
-        loss = tf.losses.sigmoid_cross_entropy(multi_class_labels=labels, logits=logits)#, weights=w_tensor)
+    #w_tensor = tf.convert_to_tensor(w)
+    #w_tensor = tf.reshape(w_tensor, [-1,228])
+    loss = tf.losses.sigmoid_cross_entropy(multi_class_labels=labels, logits=logits)#, weights=w_tensor)
 
     #loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=logits)
 
     # Configure the Training Op (for TRAIN mode)
     if mode == tf.estimator.ModeKeys.TRAIN:
-        optimizer = tf.train.AdagradOptimizer(learning_rate=0.0008)
+        global_step = tf.train.get_global_step()
+        learning_rate = tf.train.exponential_decay(
+            learning_rate=STARTER_LEARNING_RATE, global_step=global_step,
+            decay_steps=DECAY_STEPS, decay_rate=DECAY_RATE
+        )
+        if global_step % DECAY_STEPS == 0:
+            tf.logging.info('Learning rate at global step '+str(global_step)+': '+str(learning_rate))
+        optimizer = tf.train.AdagradOptimizer(learning_rate=learning_rate)
         train_op = optimizer.minimize(
             loss=loss,
-            global_step=tf.train.get_global_step())
+            global_step=global_step)
         return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op)
 
     # Customize evaluation metric
